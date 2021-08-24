@@ -44,10 +44,50 @@ impl<'a, T: ?Sized> ArcRef<'a, T> {
     }
 }
 
+impl<K: Hash + Eq, V: ?Sized> Default for CacheMap<K, V> {
+    fn default() -> Self {
+        CacheMap {
+            inner: Default::default(),
+        }
+    }
+}
+
+impl<K: Hash + Eq, V> std::iter::FromIterator<(K, V)> for CacheMap<K, V> {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = (K, V)>,
+    {
+        CacheMap {
+            inner: iter.into_iter().map(|(k, v)| (k, Arc::new(v))).collect(),
+        }
+    }
+}
+
+pub struct IntoIter<K, V>(
+    dashmap::iter::OwningIter<K, Arc<V>, std::collections::hash_map::RandomState>,
+);
+
+impl<K: Eq + Hash, V> Iterator for IntoIter<K, V> {
+    type Item = (K, Arc<V>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+}
+
+impl<K: Hash + Eq, V> IntoIterator for CacheMap<K, V> {
+    type Item = (K, Arc<V>);
+    type IntoIter = IntoIter<K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter(self.inner.into_iter())
+    }
+}
+
 impl<K: Hash + Eq, V> CacheMap<K, V> {
     /// Fetch the value associated with the key, or run the profvided function to insert one.
     ///
-    /// #Example
+    /// # Example
     ///
     /// ```
     /// use cachemap::CacheMap;
@@ -73,10 +113,10 @@ impl<K: Hash + Eq, V: ?Sized> CacheMap<K, V> {
         }
     }
 
-    /// Fetch the value associated with the key, or run the profvided function to insert one.
+    /// Fetch the value associated with the key, or run the provided function to insert one.
     /// With this version, the function returns an Arc<V>, whch allows caching unsized types.
     ///
-    /// #Example
+    /// # Example
     ///
     /// ```
     /// use cachemap::CacheMap;
