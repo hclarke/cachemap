@@ -111,6 +111,15 @@ impl<K: Hash + Eq, V> CacheMap<K, V> {
     {
         self.cache(key, || Default::default())
     }
+
+    /// Return whether the map contains the given key.
+    pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool
+    where
+        K: std::borrow::Borrow<Q>,
+        Q: Hash + Eq,
+    {
+        self.inner.contains_key(key)
+    }
 }
 
 impl<K: Hash + Eq, V: ?Sized> CacheMap<K, V> {
@@ -162,6 +171,15 @@ mod tests {
 
         let a = m.cache("key", || 21u32).as_ref();
         assert_eq!(21, *a);
+    }
+
+    #[test]
+    fn contains_key() {
+        let m = CacheMap::new();
+
+        m.cache("key", || 21u32);
+        assert!(m.contains_key("key"));
+        assert!(!m.contains_key("other"));
     }
 
     #[test]
