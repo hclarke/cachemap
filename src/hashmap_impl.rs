@@ -1,16 +1,68 @@
-use std::collections::HashMap;
 use std::hash::Hash;
-use std::sync::Mutex;
 
-/// An insert-only map for caching the result of functions
-pub struct CacheMap<K, V> {
-    inner: Mutex<HashMap<K, Box<V>>>,
+#[cfg(not(feature = "abi_stable"))]
+mod basic_impl {
+    pub type BoxImpl<T> = Box<T>;
+    pub type HashMapImpl<K, V> = std::collections::HashMap<K, V>;
+    pub type MutexImpl<T> = std::sync::Mutex<T>;
+    pub type IntoIterImpl<K, V> = std::collections::hash_map::IntoIter<K, V>;
+
+    pub fn box_into_inner_impl<T>(b: BoxImpl<T>) -> T {
+        *b
+    }
+
+    pub fn mutex_lock_impl<'a, T>(m: &'a MutexImpl<T>) -> std::sync::MutexGuard<'a, T> {
+        m.lock().unwrap()
+    }
+
+    pub fn mutex_into_inner_impl<T>(m: MutexImpl<T>) -> T {
+        m.into_inner().unwrap()
+    }
 }
 
-impl<K, V> Default for CacheMap<K, V> {
+#[cfg(not(feature = "abi_stable"))]
+use basic_impl::*;
+
+#[cfg(feature = "abi_stable")]
+mod abi_stable_impl {
+    use abi_stable::{
+        external_types::RMutex,
+        std_types::{RBox, RHashMap},
+    };
+    pub type BoxImpl<T> = RBox<T>;
+    pub type HashMapImpl<K, V> = RHashMap<K, V>;
+    pub type MutexImpl<T> = RMutex<T>;
+    pub type IntoIterImpl<K, V> = abi_stable::std_types::map::IntoIter<K, V>;
+
+    pub fn box_into_inner_impl<T>(b: BoxImpl<T>) -> T {
+        RBox::into_inner(b)
+    }
+
+    pub fn mutex_lock_impl<'a, T>(
+        m: &'a MutexImpl<T>,
+    ) -> abi_stable::external_types::parking_lot::mutex::RMutexGuard<'a, T> {
+        m.lock()
+    }
+
+    pub fn mutex_into_inner_impl<T>(m: MutexImpl<T>) -> T {
+        m.into_inner()
+    }
+}
+
+#[cfg(feature = "abi_stable")]
+use abi_stable_impl::*;
+
+/// An insert-only map for caching the result of functions
+#[cfg_attr(feature = "abi_stable", derive(abi_stable::StableAbi))]
+#[cfg_attr(feature = "abi_stable", repr(C))]
+pub struct CacheMap<K, V> {
+    inner: MutexImpl<HashMapImpl<K, BoxImpl<V>>>,
+}
+
+impl<K: Eq + Hash, V> Default for CacheMap<K, V> {
     fn default() -> Self {
         CacheMap {
-            inner: Default::default(),
+            inner: MutexImpl::new(Default::default()),
         }
     }
 }
@@ -21,18 +73,22 @@ impl<K: Eq + Hash, V> std::iter::FromIterator<(K, V)> for CacheMap<K, V> {
         T: IntoIterator<Item = (K, V)>,
     {
         CacheMap {
-            inner: Mutex::new(iter.into_iter().map(|(k, v)| (k, Box::new(v))).collect()),
+            inner: MutexImpl::new(
+                iter.into_iter()
+                    .map(|(k, v)| (k, BoxImpl::new(v)))
+                    .collect(),
+            ),
         }
     }
 }
 
-pub struct IntoIter<K, V>(std::collections::hash_map::IntoIter<K, Box<V>>);
+pub struct IntoIter<K, V>(IntoIterImpl<K, BoxImpl<V>>);
 
 impl<K, V> Iterator for IntoIter<K, V> {
     type Item = (K, V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(|(k, v)| (k, *v))
+        self.0.next().map(|t| (t.0, box_into_inner_impl(t.1)))
     }
 }
 
@@ -41,7 +97,7 @@ impl<K, V> IntoIterator for CacheMap<K, V> {
     type IntoIter = IntoIter<K, V>;
 
     fn into_iter(self) -> Self::IntoIter {
-        IntoIter(self.inner.into_inner().unwrap().into_iter())
+        IntoIter(mutex_into_inner_impl(self.inner).into_iter())
     }
 }
 
@@ -63,11 +119,9 @@ impl<K: Eq + Hash, V> CacheMap<K, V> {
     /// ```
     pub fn cache<F: FnOnce() -> V>(&self, key: K, f: F) -> &V {
         let v = std::ptr::NonNull::from(
-            self.inner
-                .lock()
-                .unwrap()
+            mutex_lock_impl(&self.inner)
                 .entry(key)
-                .or_insert_with(|| Box::new(f()))
+                .or_insert_with(|| BoxImpl::new(f()))
                 .as_ref(),
         );
         // Safety: We only support adding entries to the hashmap, and as long as a reference is
@@ -89,11 +143,11 @@ impl<K: Eq + Hash, V> CacheMap<K, V> {
         K: std::borrow::Borrow<Q>,
         Q: Hash + Eq,
     {
-        self.inner.lock().unwrap().contains_key(key)
+        mutex_lock_impl(&self.inner).contains_key(key)
     }
 }
 
-impl<K, V> CacheMap<K, V> {
+impl<K: Eq + Hash, V> CacheMap<K, V> {
     /// Creates a new CacheMap
     pub fn new() -> Self {
         Default::default()

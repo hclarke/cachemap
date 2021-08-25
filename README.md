@@ -26,3 +26,5 @@ assert_eq!(*fst, 5u32);
   internally and allows:
   - getting `Arc<V>` pointers, in case values need to outlive the map
   - adding `Arc<V>` directly, allowing unsized values, and re-using `Arc<V>`s from elsewhere
+- clients can optionally enable the `abi_stable` feature which will derive
+  `abi_stable::StableAbi` on the type
