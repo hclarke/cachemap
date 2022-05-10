@@ -13,4 +13,4 @@ license = "MIT"
 
 [dependencies]
 dashmap = { version = "4.0.2", optional = true }
-abi_stable = { version = "0.9", optional = true }
+abi_stable = { version = "*", optional = true }
