@@ -5,13 +5,15 @@ mod basic_impl {
     pub type BoxImpl<T> = Box<T>;
     pub type HashMapImpl<K, V> = std::collections::HashMap<K, V>;
     pub type MutexImpl<T> = std::sync::Mutex<T>;
+    pub type MutexGuardImpl<'a, T> = std::sync::MutexGuard<'a, T>;
+    pub type IterImpl<'a, K, V> = std::collections::hash_map::Iter<'a, K, V>;
     pub type IntoIterImpl<K, V> = std::collections::hash_map::IntoIter<K, V>;
 
     pub fn box_into_inner_impl<T>(b: BoxImpl<T>) -> T {
         *b
     }
 
-    pub fn mutex_lock_impl<'a, T>(m: &'a MutexImpl<T>) -> std::sync::MutexGuard<'a, T> {
+    pub fn mutex_lock_impl<'a, T>(m: &'a MutexImpl<T>) -> MutexGuardImpl<'a, T> {
         m.lock().unwrap()
     }
 
@@ -32,15 +34,16 @@ mod abi_stable_impl {
     pub type BoxImpl<T> = RBox<T>;
     pub type HashMapImpl<K, V> = RHashMap<K, V>;
     pub type MutexImpl<T> = RMutex<T>;
+    pub type MutexGuardImpl<'a, T> =
+        abi_stable::external_types::parking_lot::mutex::RMutexGuard<'a, T>;
+    pub type IterImpl<'a, K, V> = abi_stable::std_types::map::Iter<'a, K, V>;
     pub type IntoIterImpl<K, V> = abi_stable::std_types::map::IntoIter<K, V>;
 
     pub fn box_into_inner_impl<T>(b: BoxImpl<T>) -> T {
         RBox::into_inner(b)
     }
 
-    pub fn mutex_lock_impl<'a, T>(
-        m: &'a MutexImpl<T>,
-    ) -> abi_stable::external_types::parking_lot::mutex::RMutexGuard<'a, T> {
+    pub fn mutex_lock_impl<'a, T>(m: &'a MutexImpl<T>) -> MutexGuardImpl<'a, T> {
         m.lock()
     }
 
@@ -101,6 +104,35 @@ impl<K, V> IntoIterator for CacheMap<K, V> {
     }
 }
 
+pub struct Iter<'a, K, V> {
+    iter: IterImpl<'a, K, BoxImpl<V>>,
+    _guard: MutexGuardImpl<'a, HashMapImpl<K, BoxImpl<V>>>,
+}
+
+impl<'a, K, V> Iterator for Iter<'a, K, V> {
+    type Item = (&'a K, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|t| (t.0, t.1.as_ref()))
+    }
+}
+
+impl<'a, K, V> IntoIterator for &'a CacheMap<K, V> {
+    type Item = (&'a K, &'a V);
+    type IntoIter = Iter<'a, K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let guard = mutex_lock_impl(&self.inner);
+        let iter = unsafe {
+            std::mem::transmute::<IterImpl<K, BoxImpl<V>>, IterImpl<K, BoxImpl<V>>>(guard.iter())
+        };
+        Iter {
+            iter,
+            _guard: guard,
+        }
+    }
+}
+
 impl<K: Eq + Hash, V> CacheMap<K, V> {
     /// Fetch the value associated with the key, or run the provided function to insert one.
     ///
@@ -144,6 +176,13 @@ impl<K: Eq + Hash, V> CacheMap<K, V> {
         Q: Hash + Eq,
     {
         mutex_lock_impl(&self.inner).contains_key(key)
+    }
+
+    /// Return an iterator over the map.
+    ///
+    /// This iterator will lock the underlying map until it is dropped.
+    pub fn iter(&self) -> Iter<K, V> {
+        self.into_iter()
     }
 }
 
@@ -204,5 +243,22 @@ mod tests {
 
         assert_eq!(5, *a);
         assert_eq!(7, *b);
+    }
+
+    #[test]
+    fn iter() {
+        use std::collections::HashMap;
+        use std::iter::FromIterator;
+        let m = CacheMap::new();
+        m.cache("a", || 5u32);
+        m.cache("b", || 7u32);
+
+        let mut expected = HashMap::<&'static str, u32>::from_iter([("a", 5u32), ("b", 7u32)]);
+
+        for (k, v) in &m {
+            assert!(expected.remove(k).expect("unexpected key") == *v);
+        }
+
+        assert!(expected.is_empty());
     }
 }
