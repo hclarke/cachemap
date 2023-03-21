@@ -139,7 +139,7 @@ impl<K: Eq + Hash, V> CacheMap<K, V> {
     /// # Example
     ///
     /// ```
-    /// use cachemap::CacheMap;
+    /// use cachemap2::CacheMap;
     ///
     /// let m = CacheMap::new();
     ///

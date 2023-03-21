@@ -90,7 +90,7 @@ impl<K: Hash + Eq, V> CacheMap<K, V> {
     /// # Example
     ///
     /// ```
-    /// use cachemap::CacheMap;
+    /// use cachemap2::CacheMap;
     ///
     /// let m = CacheMap::new();
     ///
@@ -136,7 +136,7 @@ impl<K: Hash + Eq, V: ?Sized> CacheMap<K, V> {
     /// # Example
     ///
     /// ```
-    /// use cachemap::CacheMap;
+    /// use cachemap2::CacheMap;
     ///
     /// let m: CacheMap<_, [usize]> = CacheMap::new();
     ///
