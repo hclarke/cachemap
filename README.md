@@ -2,7 +2,10 @@
 
 CacheMap is a data structure for concurrently caching values.
 
-the `cache` function will look up a value in the map, or generate and store a new one using the provided function
+The `cache` function will look up a value in the map, or generate and store a new one using the
+provided function.
+
+This is a updated and maintained fork of [hclarke/cachemap](https://github.com/hclarke/cachemap).
 
 ## Example
 
@@ -11,22 +14,23 @@ use cachemap::CacheMap;
 	
 let m = CacheMap::new();
 
-let fst = m.cache("key", || 5u32).as_ref();
-let snd = m.cache("key", || 7u32).as_ref();
+let fst = m.cache("key", || 5u32);
+let snd = m.cache("key", || 7u32);
 
 assert_eq!(*fst, *snd);
 assert_eq!(*fst, 5u32);
 ```
 
-## Features 🌞
+## Features
 
-- can cache values concurrently (using `&CacheMap<K,V>` rather than `&mut CacheMap<K,V>`)
-- returned references use the map's lifetime, so clients can avoid smart pointers
-- clients can optionally get `Arc<V>` pointers, in case values need to outlive the map
-- values can be addes as `Arc<V>`, allowing unsized values, and re-using `Arc<V>`s from elsewhere
+- Can cache values concurrently (using `&CacheMap<K,V>` rather than `&mut CacheMap<K,V>`).
+- Returned references use the map's lifetime, so clients can avoid smart pointers.
+- Clients can optionally enable the `dashmap` feature, which uses `dashmap` internally and allows:
+  - getting `Arc<V>` pointers, in case values need to outlive the map, and
+  - adding `Arc<V>` directly, allowing unsized values, and re-using `Arc<V>`s from elsewhere.
+- Clients can optionally enable the `abi_stable` feature which will derive `abi_stable::StableAbi`
+  on the type.
 
-## MisFeatures 💧
+## AntiFeatures
 
-> A cache with a bad policy is another name for a memory leak
-
-this map provides only one way to remove things from the cache: drop the entire map.
+- There is no cache invalidation: the only way to remove things from a CacheMap is to drop it.
