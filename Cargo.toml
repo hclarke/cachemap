@@ -1,6 +1,6 @@
 [package]
 name = "cachemap2"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Alex Franchuk <alex.franchuk@gmail.com>"]
 edition = "2021"
 keywords = ["sync", "data-structure", "cache", "hash-map"]
