@@ -1,12 +1,12 @@
 use dashmap::DashMap;
-use std::hash::Hash;
-use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
+use std::{collections::hash_map::RandomState, hash::Hash};
+use std::{hash::BuildHasher, marker::PhantomData};
 
 /// An insert-only map for caching the result of functions
-pub struct CacheMap<K: Hash + Eq, V: ?Sized> {
-    inner: DashMap<K, Arc<V>>,
+pub struct CacheMap<K: Hash + Eq, V: ?Sized, S = RandomState> {
+    inner: DashMap<K, Arc<V>, S>,
 }
 
 /// A handle that can be converted to a &T or an Arc<T>
@@ -44,7 +44,7 @@ impl<'a, T: ?Sized> ArcRef<'a, T> {
     }
 }
 
-impl<K: Hash + Eq, V: ?Sized> Default for CacheMap<K, V> {
+impl<K: Hash + Eq, V: ?Sized, S: BuildHasher + Default + Clone> Default for CacheMap<K, V, S> {
     fn default() -> Self {
         CacheMap {
             inner: Default::default(),
@@ -52,7 +52,9 @@ impl<K: Hash + Eq, V: ?Sized> Default for CacheMap<K, V> {
     }
 }
 
-impl<K: Hash + Eq, V> std::iter::FromIterator<(K, V)> for CacheMap<K, V> {
+impl<K: Hash + Eq, V, S: BuildHasher + Default + Clone> std::iter::FromIterator<(K, V)>
+    for CacheMap<K, V, S>
+{
     fn from_iter<T>(iter: T) -> Self
     where
         T: IntoIterator<Item = (K, V)>,
@@ -63,11 +65,9 @@ impl<K: Hash + Eq, V> std::iter::FromIterator<(K, V)> for CacheMap<K, V> {
     }
 }
 
-pub struct IntoIter<K, V>(
-    dashmap::iter::OwningIter<K, Arc<V>, std::collections::hash_map::RandomState>,
-);
+pub struct IntoIter<K, V, S>(dashmap::iter::OwningIter<K, Arc<V>, S>);
 
-impl<K: Eq + Hash, V> Iterator for IntoIter<K, V> {
+impl<K: Eq + Hash, V, S: BuildHasher + Clone> Iterator for IntoIter<K, V, S> {
     type Item = (K, Arc<V>);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -75,16 +75,16 @@ impl<K: Eq + Hash, V> Iterator for IntoIter<K, V> {
     }
 }
 
-impl<K: Hash + Eq, V> IntoIterator for CacheMap<K, V> {
+impl<K: Hash + Eq, V, S: BuildHasher + Clone> IntoIterator for CacheMap<K, V, S> {
     type Item = (K, Arc<V>);
-    type IntoIter = IntoIter<K, V>;
+    type IntoIter = IntoIter<K, V, S>;
 
     fn into_iter(self) -> Self::IntoIter {
         IntoIter(self.inner.into_iter())
     }
 }
 
-impl<K: Hash + Eq, V> CacheMap<K, V> {
+impl<K: Hash + Eq, V, S: BuildHasher + Clone> CacheMap<K, V, S> {
     /// Fetch the value associated with the key, or run the provided function to insert one.
     ///
     /// # Example
@@ -122,11 +122,20 @@ impl<K: Hash + Eq, V> CacheMap<K, V> {
     }
 }
 
-impl<K: Hash + Eq, V: ?Sized> CacheMap<K, V> {
+impl<K: Hash + Eq, V: ?Sized> CacheMap<K, V, RandomState> {
     /// Creates a new CacheMap
     pub fn new() -> Self {
         CacheMap {
             inner: DashMap::new(),
+        }
+    }
+}
+
+impl<K: Hash + Eq, V: ?Sized, S: BuildHasher + Clone> CacheMap<K, V, S> {
+    /// Creates a new CacheMap with the provided hasher
+    pub fn with_hasher(hash_builder: S) -> Self {
+        Self {
+            inner: DashMap::with_hasher(hash_builder),
         }
     }
 

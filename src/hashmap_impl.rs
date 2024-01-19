@@ -1,9 +1,10 @@
-use std::hash::Hash;
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hash};
 
 #[cfg(not(feature = "abi_stable"))]
 mod basic_impl {
     pub type BoxImpl<T> = Box<T>;
-    pub type HashMapImpl<K, V> = std::collections::HashMap<K, V>;
+    pub type HashMapImpl<K, V, S> = std::collections::HashMap<K, V, S>;
     pub type MutexImpl<T> = std::sync::Mutex<T>;
     pub type MutexGuardImpl<'a, T> = std::sync::MutexGuard<'a, T>;
     pub type IterImpl<'a, K, V> = std::collections::hash_map::Iter<'a, K, V>;
@@ -32,7 +33,7 @@ mod abi_stable_impl {
         std_types::{RBox, RHashMap},
     };
     pub type BoxImpl<T> = RBox<T>;
-    pub type HashMapImpl<K, V> = RHashMap<K, V>;
+    pub type HashMapImpl<K, V, S> = RHashMap<K, V, S>;
     pub type MutexImpl<T> = RMutex<T>;
     pub type MutexGuardImpl<'a, T> =
         abi_stable::external_types::parking_lot::mutex::RMutexGuard<'a, T>;
@@ -58,11 +59,11 @@ use abi_stable_impl::*;
 /// An insert-only map for caching the result of functions
 #[cfg_attr(feature = "abi_stable", derive(abi_stable::StableAbi))]
 #[cfg_attr(feature = "abi_stable", repr(C))]
-pub struct CacheMap<K, V> {
-    inner: MutexImpl<HashMapImpl<K, BoxImpl<V>>>,
+pub struct CacheMap<K, V, S = RandomState> {
+    inner: MutexImpl<HashMapImpl<K, BoxImpl<V>, S>>,
 }
 
-impl<K: Eq + Hash, V> Default for CacheMap<K, V> {
+impl<K: Eq + Hash, V, S: BuildHasher + Default> Default for CacheMap<K, V, S> {
     fn default() -> Self {
         CacheMap {
             inner: MutexImpl::new(Default::default()),
@@ -70,7 +71,9 @@ impl<K: Eq + Hash, V> Default for CacheMap<K, V> {
     }
 }
 
-impl<K: Eq + Hash, V> std::iter::FromIterator<(K, V)> for CacheMap<K, V> {
+impl<K: Eq + Hash, V, S: BuildHasher + Default> std::iter::FromIterator<(K, V)>
+    for CacheMap<K, V, S>
+{
     fn from_iter<T>(iter: T) -> Self
     where
         T: IntoIterator<Item = (K, V)>,
@@ -95,7 +98,7 @@ impl<K, V> Iterator for IntoIter<K, V> {
     }
 }
 
-impl<K, V> IntoIterator for CacheMap<K, V> {
+impl<K, V, S> IntoIterator for CacheMap<K, V, S> {
     type Item = (K, V);
     type IntoIter = IntoIter<K, V>;
 
@@ -104,12 +107,12 @@ impl<K, V> IntoIterator for CacheMap<K, V> {
     }
 }
 
-pub struct Iter<'a, K, V> {
+pub struct Iter<'a, K, V, S> {
     iter: IterImpl<'a, K, BoxImpl<V>>,
-    _guard: MutexGuardImpl<'a, HashMapImpl<K, BoxImpl<V>>>,
+    _guard: MutexGuardImpl<'a, HashMapImpl<K, BoxImpl<V>, S>>,
 }
 
-impl<'a, K, V> Iterator for Iter<'a, K, V> {
+impl<'a, K, V, S> Iterator for Iter<'a, K, V, S> {
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -117,9 +120,9 @@ impl<'a, K, V> Iterator for Iter<'a, K, V> {
     }
 }
 
-impl<'a, K, V> IntoIterator for &'a CacheMap<K, V> {
+impl<'a, K, V, S> IntoIterator for &'a CacheMap<K, V, S> {
     type Item = (&'a K, &'a V);
-    type IntoIter = Iter<'a, K, V>;
+    type IntoIter = Iter<'a, K, V, S>;
 
     fn into_iter(self) -> Self::IntoIter {
         let guard = mutex_lock_impl(&self.inner);
@@ -133,7 +136,7 @@ impl<'a, K, V> IntoIterator for &'a CacheMap<K, V> {
     }
 }
 
-impl<K: Eq + Hash, V> CacheMap<K, V> {
+impl<K: Eq + Hash, V, S: BuildHasher> CacheMap<K, V, S> {
     /// Fetch the value associated with the key, or run the provided function to insert one.
     ///
     /// # Example
@@ -181,15 +184,24 @@ impl<K: Eq + Hash, V> CacheMap<K, V> {
     /// Return an iterator over the map.
     ///
     /// This iterator will lock the underlying map until it is dropped.
-    pub fn iter(&self) -> Iter<K, V> {
+    pub fn iter(&self) -> Iter<K, V, S> {
         self.into_iter()
     }
 }
 
-impl<K: Eq + Hash, V> CacheMap<K, V> {
+impl<K: Eq + Hash, V> CacheMap<K, V, RandomState> {
     /// Creates a new CacheMap
     pub fn new() -> Self {
         Default::default()
+    }
+}
+
+impl<K: Eq + Hash, V, S: BuildHasher + Default> CacheMap<K, V, S> {
+    /// Creates a new CacheMap with the provided hasher
+    pub fn with_hasher(hash_builder: S) -> Self {
+        Self {
+            inner: MutexImpl::new(HashMapImpl::with_hasher(hash_builder)),
+        }
     }
 }
 
